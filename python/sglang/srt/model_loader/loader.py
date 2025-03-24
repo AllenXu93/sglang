@@ -604,28 +604,41 @@ class ShardedStateLoader(BaseModelLoader):
                     f"pre-sharded checkpoints are currently supported!"
                 )
             state_dict = self._filter_subtensors(model.state_dict())
-            for path in filepaths:
-                with safe_open(path, framework="pt") as f:
-                    for key in f.keys():  # noqa: SIM118
-                        tensor = f.get_tensor(key)
-                        # If loading with LoRA enabled, additional padding may
-                        # be added to certain parameters. We only load into a
-                        # narrowed view of the parameter data.
-                        param_data = state_dict[key].data
-                        param_shape = state_dict[key].shape
-                        for dim, size in enumerate(tensor.shape):
-                            if size < param_shape[dim]:
-                                param_data = param_data.narrow(dim, 0, size)
-                        if tensor.shape != param_shape:
-                            logger.warning(
-                                "loading tensor of shape %s into "
-                                "parameter '%s' of shape %s",
-                                tensor.shape,
-                                key,
-                                param_shape,
-                            )
-                        param_data.copy_(tensor)
-                        state_dict.pop(key)
+
+            def load_tensor(key, tensor):
+                # If loading with LoRA enabled, additional padding may
+                # be added to certain parameters. We only load into a
+                # narrowed view of the parameter data.
+                param_data = state_dict[key].data
+                param_shape = state_dict[key].shape
+                for dim, size in enumerate(tensor.shape):
+                    if size < param_shape[dim]:
+                        param_data = param_data.narrow(dim, 0, size)
+                if tensor.shape != param_shape:
+                    logger.warning(
+                        "loading tensor of shape %s into "
+                        "parameter '%s' of shape %s",
+                        tensor.shape,
+                        key,
+                        param_shape,
+                    )
+                param_data.copy_(tensor)
+                state_dict.pop(key)
+
+            if os.environ.get("RUNAI_STREAM", None) != None:
+                from runai_model_streamer import SafetensorsStreamer
+                with SafetensorsStreamer() as streamer:
+                    for path in filepaths:
+                        streamer.stream_file(path)
+                        for key, tensor in streamer.get_tensors():
+                            load_tensor(key=key, tensor=tensor)
+            else:
+                for path in filepaths:
+                    with safe_open(path, framework="pt") as f:
+                        for key in f.keys():  # noqa: SIM118
+                            tensor = f.get_tensor(key)
+                            load_tensor(key=key, tensor=tensor)
+                        
             if state_dict:
                 raise ValueError(f"Missing keys {tuple(state_dict)} in loaded state!")
         return model.eval()

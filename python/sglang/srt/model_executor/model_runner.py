@@ -346,6 +346,7 @@ class ModelRunner:
         return min_per_gpu_memory
 
     def load_model(self):
+        start = time.time()
         before_avail_memory = get_available_gpu_memory(self.device, self.gpu_id)
         logger.info(
             f"Load weight begin. avail mem={get_available_gpu_memory(self.device, self.gpu_id):.2f} GB"
@@ -420,12 +421,14 @@ class ModelRunner:
         self.dtype = self.model_config.dtype
 
         after_avail_memory = get_available_gpu_memory(self.device, self.gpu_id)
+        end = time.time()
         logger.info(
             f"Load weight end. "
             f"type={type(self.model).__name__}, "
             f"dtype={self.dtype}, "
             f"avail mem={after_avail_memory:.2f} GB, "
             f"mem usage={(before_avail_memory - after_avail_memory):.2f} GB."
+            f"total cose: {(end - start):.2f} s"
         )
 
         # Handle the case where some ranks do not finish loading.

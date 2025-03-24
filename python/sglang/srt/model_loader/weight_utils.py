@@ -431,15 +431,27 @@ def safetensors_weights_iterator(
     enable_tqdm = (
         not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
     )
-    for st_file in tqdm(
-        hf_weights_files,
-        desc="Loading safetensors checkpoint shards",
-        disable=not enable_tqdm,
-        bar_format=_BAR_FORMAT,
-    ):
-        result = safetensors.torch.load_file(st_file, device="cpu")
-        for name, param in result.items():
-            yield name, param
+    if os.environ.get("RUNAI_STREAM", None) != None:
+        from runai_model_streamer import SafetensorsStreamer
+        with SafetensorsStreamer() as streamer:
+            for st_file in tqdm(
+                hf_weights_files,
+                desc="Loading safetensors checkpoint shards",
+                disable=not enable_tqdm,
+                bar_format=_BAR_FORMAT,
+            ):
+                streamer.stream_file(st_file)
+                yield from streamer.get_tensors()
+    else:
+        for st_file in tqdm(
+            hf_weights_files,
+            desc="Loading safetensors checkpoint shards",
+            disable=not enable_tqdm,
+            bar_format=_BAR_FORMAT,
+        ):
+            result = safetensors.torch.load_file(st_file, device="cpu")
+            for name, param in result.items():
+                yield name, param
 
 
 def pt_weights_iterator(
